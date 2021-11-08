@@ -13,13 +13,10 @@ from stable_baselines3.common.utils import explained_variance
 class A2C(OnPolicyAlgorithm):
     """
     Advantage Actor Critic (A2C)
-
     Paper: https://arxiv.org/abs/1602.01783
     Code: This implementation borrows code from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail and
     and Stable Baselines (https://github.com/hill-a/stable-baselines)
-
     Introduction to A2C: https://hackernoon.com/intuitive-rl-intro-to-advantage-actor-critic-a2c-4ff545978752
-
     :param policy: The policy model to use (MlpPolicy, CnnPolicy, ...)
     :param env: The environment to learn from (if registered in Gym, can be str)
     :param learning_rate: The learning rate, it can be a function
@@ -59,6 +56,7 @@ class A2C(OnPolicyAlgorithm):
         n_steps: int = 5,
         gamma: float = 0.99,
         gae_lambda: float = 1.0,
+        use_n_step_advantage: bool = False,
         ent_coef: float = 0.0,
         vf_coef: float = 0.5,
         max_grad_norm: float = 0.5,
@@ -83,6 +81,7 @@ class A2C(OnPolicyAlgorithm):
             n_steps=n_steps,
             gamma=gamma,
             gae_lambda=gae_lambda,
+            use_n_step_advantage=use_n_step_advantage,
             ent_coef=ent_coef,
             vf_coef=vf_coef,
             max_grad_norm=max_grad_norm,

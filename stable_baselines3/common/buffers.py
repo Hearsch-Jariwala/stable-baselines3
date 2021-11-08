@@ -25,7 +25,6 @@ except ImportError:
 class BaseBuffer(ABC):
     """
     Base class that represent a buffer (rollout or replay)
-
     :param buffer_size: Max number of element in the buffer
     :param observation_space: Observation space
     :param action_space: Action space
@@ -60,7 +59,6 @@ class BaseBuffer(ABC):
         Swap and then flatten axes 0 (buffer_size) and 1 (n_envs)
         to convert shape from [n_steps, n_envs, ...] (when ... is the shape of the features)
         to [n_steps * n_envs, ...] (which maintain the order)
-
         :param arr:
         :return:
         """
@@ -124,7 +122,6 @@ class BaseBuffer(ABC):
         """
         Convert a numpy array to a PyTorch tensor.
         Note: it copies the data by default
-
         :param array:
         :param copy: Whether to copy or not the data
             (may be useful to avoid changing things be reference)
@@ -153,7 +150,6 @@ class BaseBuffer(ABC):
 class ReplayBuffer(BaseBuffer):
     """
     Replay buffer used in off-policy algorithms like SAC/TD3.
-
     :param buffer_size: Max number of element in the buffer
     :param observation_space: Observation space
     :param action_space: Action space
@@ -256,7 +252,6 @@ class ReplayBuffer(BaseBuffer):
         Custom sampling when using memory efficient variant,
         as we should not sample the element with index `self.pos`
         See https://github.com/DLR-RM/stable-baselines3/pull/28#issuecomment-637559274
-
         :param batch_size: Number of element to sample
         :param env: associated gym VecEnv
             to normalize the observations/rewards when sampling
@@ -299,11 +294,9 @@ class RolloutBuffer(BaseBuffer):
     This experience will be discarded after the policy update.
     In order to use PPO objective, we also store the current value of each state
     and the log probability of each taken action.
-
     The term rollout here refers to the model-free notion and should not
     be used with the concept of rollout used in model-based RL or planning.
     Hence, it is only involved in policy and value function training but not action selection.
-
     :param buffer_size: Max number of element in the buffer
     :param observation_space: Observation space
     :param action_space: Action space
@@ -321,12 +314,14 @@ class RolloutBuffer(BaseBuffer):
         action_space: spaces.Space,
         device: Union[th.device, str] = "cpu",
         gae_lambda: float = 1,
+        use_n_step_advantage: bool = False,
         gamma: float = 0.99,
         n_envs: int = 1,
     ):
 
         super(RolloutBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
         self.gae_lambda = gae_lambda
+        self.use_n_step_advantage = use_n_step_advantage
         self.gamma = gamma
         self.observations, self.actions, self.rewards, self.advantages = None, None, None, None
         self.returns, self.episode_starts, self.values, self.log_probs = None, None, None, None
@@ -350,26 +345,23 @@ class RolloutBuffer(BaseBuffer):
         """
         Post-processing step: compute the lambda-return (TD(lambda) estimate)
         and GAE(lambda) advantage.
-
         Uses Generalized Advantage Estimation (https://arxiv.org/abs/1506.02438)
         to compute the advantage. To obtain vanilla advantage (A(s) = R - V(S))
         where R is the discounted reward with value bootstrap,
         set ``gae_lambda=1.0`` during initialization.
-
         The TD(lambda) estimator has also two special cases:
         - TD(1) is Monte-Carlo estimate (sum of discounted rewards)
         - TD(0) is one-step estimate with bootstrapping (r_t + gamma * v(s_{t+1}))
-
         For more information, see discussion in https://github.com/DLR-RM/stable-baselines3/pull/375.
-
         :param last_values: state value estimation for the last step (one for each env)
         :param dones: if the last step was a terminal step (one bool for each env).
-
         """
         # Convert to numpy
         last_values = last_values.clone().cpu().numpy().flatten()
+        use_n_step_advantage = self.use_n_step_advantage
 
         last_gae_lam = 0
+        R = last_values
         for step in reversed(range(self.buffer_size)):
             if step == self.buffer_size - 1:
                 next_non_terminal = 1.0 - dones
@@ -377,9 +369,14 @@ class RolloutBuffer(BaseBuffer):
             else:
                 next_non_terminal = 1.0 - self.episode_starts[step + 1]
                 next_values = self.values[step + 1]
-            delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
-            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-            self.advantages[step] = last_gae_lam
+
+            if use_n_step_advantage:
+                R = self.rewards[step] + self.gamma * R * next_non_terminal
+                self.advantages[step] = R - self.values[step]
+            else:
+                delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+                last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                self.advantages[step] = last_gae_lam
         # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
         # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
         self.returns = self.advantages + self.values
@@ -466,7 +463,6 @@ class DictReplayBuffer(ReplayBuffer):
     """
     Dict Replay buffer used in off-policy algorithms like SAC/TD3.
     Extends the ReplayBuffer to use dictionary observations
-
     :param buffer_size: Max number of element in the buffer
     :param observation_space: Observation space
     :param action_space: Action space
@@ -574,7 +570,6 @@ class DictReplayBuffer(ReplayBuffer):
     def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> DictReplayBufferSamples:
         """
         Sample elements from the replay buffer.
-
         :param batch_size: Number of element to sample
         :param env: associated gym VecEnv
             to normalize the observations/rewards when sampling
@@ -607,17 +602,14 @@ class DictRolloutBuffer(RolloutBuffer):
     """
     Dict Rollout buffer used in on-policy algorithms like A2C/PPO.
     Extends the RolloutBuffer to use dictionary observations
-
     It corresponds to ``buffer_size`` transitions collected
     using the current policy.
     This experience will be discarded after the policy update.
     In order to use PPO objective, we also store the current value of each state
     and the log probability of each taken action.
-
     The term rollout here refers to the model-free notion and should not
     be used with the concept of rollout used in model-based RL or planning.
     Hence, it is only involved in policy and value function training but not action selection.
-
     :param buffer_size: Max number of element in the buffer
     :param observation_space: Observation space
     :param action_space: Action space
@@ -635,6 +627,7 @@ class DictRolloutBuffer(RolloutBuffer):
         action_space: spaces.Space,
         device: Union[th.device, str] = "cpu",
         gae_lambda: float = 1,
+        use_n_step_advantage: bool = False,
         gamma: float = 0.99,
         n_envs: int = 1,
     ):
@@ -644,6 +637,7 @@ class DictRolloutBuffer(RolloutBuffer):
         assert isinstance(self.obs_shape, dict), "DictRolloutBuffer must be used with Dict obs space only"
 
         self.gae_lambda = gae_lambda
+        self.use_n_step_advantage = use_n_step_advantage
         self.gamma = gamma
         self.observations, self.actions, self.rewards, self.advantages = None, None, None, None
         self.returns, self.episode_starts, self.values, self.log_probs = None, None, None, None
